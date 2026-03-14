@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dotenv import load_dotenv
 from google import genai
 
+from config.env_config import get_env, init_config
 from .model_selector import StaticModelSelector
 
 
@@ -25,8 +25,9 @@ def get_client() -> genai.Client:
     global _client
 
     if _client is None:
-        load_dotenv()
-        _client = genai.Client()
+        init_config()
+        api_key = get_env("GEMINI_API_KEY", required=True)
+        _client = genai.Client(api_key=api_key)
 
     return _client
 

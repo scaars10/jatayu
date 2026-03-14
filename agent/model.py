@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from dotenv import load_dotenv
-
-
 from agent.gemini_model import gemini_model, get_client
+from config.env_config import init_config
 
 
 def main() -> None:
-    load_dotenv()
+    init_config()
     client = get_client()
     response = client.models.generate_content(
         contents="Write a short story about a robot learning to love:",

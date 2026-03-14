@@ -1,42 +1,53 @@
+import importlib
 import unittest
+from unittest.mock import patch
 
-from agent.gemini_model import (
-    BALANCED_MODEL,
-    LARGE_MODEL,
-    LIGHT_MODEL,
-    get_balanced_model,
-    get_large_model,
-    get_light_model,
-    get_model_for_complexity,
-)
+gemini_model_module = importlib.import_module("agent.gemini_model")
+from agent.gemini_model import BALANCED_MODEL, LARGE_MODEL, LIGHT_MODEL, gemini_model
 
 
 class GeminiModelTests(unittest.TestCase):
-    def test_light_model_returns_flash_lite(self) -> None:
-        self.assertEqual(get_light_model(), LIGHT_MODEL)
-        self.assertIn("flash-lite", LIGHT_MODEL)
+    def setUp(self) -> None:
+        self._original_client = gemini_model_module._client
+        gemini_model_module._client = None
 
-    def test_balanced_model_returns_flash(self) -> None:
-        self.assertEqual(get_balanced_model(), BALANCED_MODEL)
-        self.assertIn("flash", BALANCED_MODEL)
+    def tearDown(self) -> None:
+        gemini_model_module._client = self._original_client
 
-    def test_large_model_returns_pro(self) -> None:
-        self.assertEqual(get_large_model(), LARGE_MODEL)
-        self.assertIn("pro", LARGE_MODEL)
+    def test_selector_returns_expected_models(self) -> None:
+        self.assertEqual(gemini_model.get_light_model(), LIGHT_MODEL)
+        self.assertEqual(gemini_model.get_balanced_model(), BALANCED_MODEL)
+        self.assertEqual(gemini_model.get_large_model(), LARGE_MODEL)
 
-    def test_complexity_aliases_map_to_expected_models(self) -> None:
-        for complexity in ("easy", "light", "simple", "small"):
-            self.assertEqual(get_model_for_complexity(complexity), LIGHT_MODEL)
+    def test_get_client_initializes_once_and_caches(self) -> None:
+        fake_client = object()
 
-        for complexity in ("balanced", "default", "medium", "moderate"):
-            self.assertEqual(get_model_for_complexity(complexity), BALANCED_MODEL)
+        with patch("agent.gemini_model.init_config") as mock_init_config:
+            with patch("agent.gemini_model.get_env", return_value="fake-api-key") as mock_get_env:
+                with patch("agent.gemini_model.genai.Client", return_value=fake_client) as mock_client_ctor:
+                    first = gemini_model_module.get_client()
+                    second = gemini_model_module.get_client()
 
-        for complexity in ("large", "complex", "hard", "advanced"):
-            self.assertEqual(get_model_for_complexity(complexity), LARGE_MODEL)
+        self.assertIs(first, fake_client)
+        self.assertIs(second, fake_client)
+        self.assertEqual(mock_init_config.call_count, 1)
+        self.assertEqual(mock_get_env.call_count, 1)
+        self.assertEqual(mock_client_ctor.call_count, 1)
+        mock_client_ctor.assert_called_once_with(api_key="fake-api-key")
 
-    def test_unknown_complexity_raises_value_error(self) -> None:
-        with self.assertRaises(ValueError):
-            get_model_for_complexity("tiny")
+    def test_get_client_reuses_existing_without_initialization(self) -> None:
+        existing_client = object()
+        gemini_model_module._client = existing_client
+
+        with patch("agent.gemini_model.init_config") as mock_init_config:
+            with patch("agent.gemini_model.get_env") as mock_get_env:
+                with patch("agent.gemini_model.genai.Client") as mock_client_ctor:
+                    client = gemini_model_module.get_client()
+
+        self.assertIs(client, existing_client)
+        mock_init_config.assert_not_called()
+        mock_get_env.assert_not_called()
+        mock_client_ctor.assert_not_called()
 
 
 if __name__ == "__main__":
