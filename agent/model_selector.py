@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+
+from pydantic import BaseModel, ConfigDict
 
 
 class ModelSelector(ABC):
@@ -18,8 +19,9 @@ class ModelSelector(ABC):
         """Return the stronger model for harder tasks."""
 
 
-@dataclass(frozen=True)
-class StaticModelSelector(ModelSelector):
+class StaticModelSelector(BaseModel, ModelSelector):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
     balanced_model: str
     large_model: str
     light_model: str
