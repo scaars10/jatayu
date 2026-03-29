@@ -7,3 +7,5 @@ class TelegramMessageEvent(BaseEvent):
     channel_id: int
     sender_id: int
     message_id: int
+    audio_bytes: bytes | None = None
+    audio_mime_type: str | None = None

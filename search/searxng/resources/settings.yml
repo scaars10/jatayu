@@ -20,30 +20,43 @@ redis:
 
 engines:
   - name: wikipedia
+    shortcut: wp
     disabled: false
 
   - name: wikidata
+    shortcut: wd
     disabled: false
 
   - name: stackoverflow
+    shortcut: so
     disabled: false
 
-  - name: brave api
+  - name: braveapi
     engine: braveapi
+    shortcut: bapi
     disabled: false
-    api_key: "YOUR_BRAVE_API_KEY"
+    api_key: "${BRAVE_API_KEY}"
 
+  - name: gemini
+    engine: gemini
+    shortcut: gmi
+    disabled: false
+    api_key: "${GEMINI_API_KEY}"
+    categories: general
+    timeout: 10.0
+
+  # Disable problematic or unnecessary default engines to avoid shortcut conflicts
+  - name: ahmia
+    disabled: true
+  - name: torch
+    disabled: true
   - name: duckduckgo
     disabled: true
-
   - name: google
     disabled: true
-
   - name: bing
     disabled: true
-
   - name: startpage
     disabled: true
-
   - name: brave
     disabled: true

@@ -6,6 +6,7 @@ from typing import Any
 @dataclass(frozen=True, slots=True)
 class AgentReply:
     response: str
+    requires_audio: bool = False
     audio_bytes: bytes | None = None
     audio_mime_type: str | None = None
     audio_file_name: str | None = None

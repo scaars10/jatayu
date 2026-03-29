@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 from google.genai import errors as genai_errors
+from pydantic_ai import exceptions as pydantic_ai_errors
 
 from agent.audio_agent import AudioAgent
 from agent.base_agent import AgentReply
@@ -62,10 +63,6 @@ class AgentReceiverRunner(BaseRunner):
             return
 
         try:
-            if isinstance(event, TelegramAudioEvent):
-                transcript = await self.audio_agent.transcribe(event)
-                event = event.model_copy(update={"transcript": transcript})
-
             await self.storage_service.record_event(event)
 
             if isinstance(event, TelegramMessageEvent):
@@ -73,7 +70,7 @@ class AgentReceiverRunner(BaseRunner):
             elif isinstance(event, TelegramPhotoEvent):
                 response = await self.image_agent.respond(event)
             elif isinstance(event, TelegramAudioEvent):
-                response = await self.audio_agent.respond(event, transcript=event.transcript)
+                response = await self.audio_agent.respond(event)
             else:
                 return
         except Exception as exc:
@@ -84,6 +81,20 @@ class AgentReceiverRunner(BaseRunner):
         reply = self._normalize_reply(response)
         if reply is None:
             return
+
+        if reply.requires_audio and not reply.audio_bytes:
+            try:
+                audio_bytes, audio_mime_type = await self.audio_agent.synthesize(reply.response)
+                if audio_bytes:
+                    reply = AgentReply(
+                        response=reply.response,
+                        requires_audio=True,
+                        audio_bytes=audio_bytes,
+                        audio_mime_type=audio_mime_type,
+                        audio_file_name=self.audio_agent._build_audio_file_name(audio_mime_type)
+                    )
+            except Exception as exc:
+                print(f"[AGENT][TTS][ERROR] {exc}")
 
         response_event = self._build_response_event(event, reply)
         await self.storage_service.record_event(response_event, channel_source=event.source)
@@ -178,6 +189,13 @@ class AgentReceiverRunner(BaseRunner):
     ) -> str:
         if isinstance(exc, genai_errors.ServerError):
             detail = "a temporary model issue"
+        elif isinstance(exc, pydantic_ai_errors.ModelHTTPError):
+            if exc.status_code in {503, 429}:
+                detail = "the model being temporarily overloaded or unavailable"
+            else:
+                detail = "a temporary model connection issue"
+        elif isinstance(exc, pydantic_ai_errors.UnexpectedModelBehavior):
+            detail = "the model acting up temporarily"
         else:
             detail = "an internal processing issue"
 

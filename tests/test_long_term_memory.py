@@ -76,16 +76,18 @@ class LongTermMemoryManagerTests(unittest.IsolatedAsyncioTestCase):
                       "memory_key": "favorite_editor",
                       "category": "preference",
                       "summary": "Uses Neovim as the primary editor.",
+                      "reasoning": "Explicit preference expressed by user.",
                       "importance": "medium",
-                      "confidence": 0.83
+                      "confidence": 0.90
                     },
                     {
                       "scope": "channel",
                       "memory_key": "project_name",
                       "category": "project",
                       "summary": "The channel is working on the Jatayu agent.",
+                      "reasoning": "Fundamental project context for this channel.",
                       "importance": "high",
-                      "confidence": 0.88
+                      "confidence": 0.95
                     }
                   ]
                 }

@@ -18,6 +18,7 @@ class MemoryCandidate(BaseModel):
     memory_key: str
     category: str
     summary: str
+    reasoning: str = Field(description="Why this fact is durable and worth remembering.")
     importance: Literal["low", "medium", "high"] = "medium"
     confidence: float = Field(default=0.7, ge=0.0, le=1.0)
 
@@ -64,7 +65,7 @@ class LongTermMemoryManager:
             assistant_response=response_text,
         )
         raw_response = await get_client().aio.models.generate_content(
-            model=gemini_model.get_light_model(),
+            model=gemini_model.get_balanced_model(),
             contents=prompt,
         )
         candidates = self._parse_extraction_response(raw_response.text or "")
@@ -72,6 +73,10 @@ class LongTermMemoryManager:
         stored: list[LongTermMemoryRecord] = []
         seen_keys: set[tuple[str, str]] = set()
         for candidate in candidates:
+            # Skip if confidence is too low or it's just a low-importance one-off
+            if candidate.confidence < 0.85:
+                continue
+            
             normalized_key = self._normalize_key(candidate.memory_key)
             category = self._normalize_key(candidate.category) or "general"
             summary = candidate.summary.strip()
@@ -107,13 +112,35 @@ class LongTermMemoryManager:
         assistant_response: str,
     ) -> str:
         lines = [
-            "You maintain long-term memory for a chat agent.",
-            "Decide whether the exchange contains durable information worth remembering for future conversations.",
-            "Store only facts that are likely to matter later: user identity, preferences, long-running projects, recurring tasks, constraints, commitments, important dates, and stable relationships.",
-            "Do not store one-off requests, temporary context, generic small talk, or details that will expire quickly.",
-            "Reuse an existing memory_key when updating the same fact.",
-            'Return strict JSON with this shape: {"memories":[{"scope":"participant|channel","memory_key":"snake_case","category":"snake_case","summary":"text","importance":"low|medium|high","confidence":0.0}]}',
-            "If nothing should be remembered, return {\"memories\":[]}.",
+            "You are a long-term memory maintenance agent for a chat assistant.",
+            "Analyze the latest exchange and decide if it contains durable facts worth remembering.",
+            "",
+            "### CRITERIA FOR REMEMBERING",
+            "- DURABILITY: Information that will remain true and relevant for weeks or months.",
+            "- UTILITY: Facts that help the assistant provide more personalized or context-aware help.",
+            "- EXAMPLES TO REMEMBER: User preferences, long-running projects, names of people/places, recurring tasks, hard constraints, and significant personal/professional milestones.",
+            "- EXAMPLES TO IGNORE: One-off questions ('How do I fix this syntax error?'), temporary requests ('Summarize this link', 'What is the weather in London?'), generic small talk ('How are you?', 'Thanks for help'), specific code snippets that are context-dependent, and details that will be irrelevant by tomorrow.",
+            "",
+            "### DURABILITY CHECK",
+            "Before adding a memory, ask yourself: 'Will the assistant still need to know this in 2 weeks?' If the answer is 'No', do not add it.",
+            "### OUTPUT FORMAT",
+            "Return strict JSON with this shape:",
+            "{",
+            '  "memories": [',
+            "    {",
+            '      "scope": "participant|channel",',
+            '      "memory_key": "snake_case_key",',
+            '      "category": "snake_case_category",',
+            '      "summary": "Clear, concise fact description.",',
+            '      "reasoning": "Explain why this is durable and not just a one-off request.",',
+            '      "importance": "low|medium|high",',
+            '      "confidence": 0.0 to 1.0',
+            "    }",
+            "  ]",
+            "}",
+            "If nothing meets the durability criteria, return {\"memories\":[]}.",
+            "",
+            "### CONTEXT",
         ]
 
         if existing_memories:
@@ -122,13 +149,15 @@ class LongTermMemoryManager:
                 lines.append(
                     f"- [{memory.scope_type}/{memory.importance}] {memory.memory_key}: {memory.summary}"
                 )
+            lines.append("")
 
         if history:
-            lines.append("Recent conversation:")
+            lines.append("Recent conversation context:")
             for turn in history[-8:]:
                 lines.append(f"{turn.role}: {turn.text}")
+            lines.append("")
 
-        lines.append("Latest exchange:")
+        lines.append("Latest exchange (PRIORITIZE THIS):")
         lines.append(f"user: {user_message}")
         lines.append(f"assistant: {assistant_response}")
         return "\n".join(lines)

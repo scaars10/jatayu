@@ -80,33 +80,15 @@ class AudioAgent(BaseAgent):
     async def stop(self) -> None:
         await self.bot.shutdown()
 
-    async def transcribe(self, event: TelegramAudioEvent) -> str:
-        file = await self.bot.get_file(event.file_id)
-        audio_bytes = bytes(await file.download_as_bytearray())
-
-        response = await get_client().aio.models.generate_content(
-            model=self.transcription_model,
-            contents=[
-                TRANSCRIPTION_PROMPT,
-                types.Part.from_bytes(
-                    data=audio_bytes,
-                    mime_type=self._resolve_input_mime_type(event),
-                ),
-            ],
-        )
-        transcript = (response.text or "").strip()
-        user_message = self._compose_user_message(event, transcript)
-        print(f"[AUDIO][{event.channel_id}] transcript={user_message or '<empty>'}")
-        return user_message
-
     async def respond(
         self,
         event: TelegramAudioEvent,
-        transcript: str | None = None,
     ) -> AgentReply | None:
-        user_message = (transcript or event.transcript or "").strip()
-        if not user_message:
-            return None
+        file = await self.bot.get_file(event.file_id)
+        audio_bytes = bytes(await file.download_as_bytearray())
+        
+        caption = (event.caption or "").strip()
+        user_message = caption if caption else "Listen to this audio."
 
         message_event = TelegramMessageEvent(
             event_id=event.event_id,
@@ -116,36 +98,39 @@ class AudioAgent(BaseAgent):
             channel_id=event.channel_id,
             sender_id=event.sender_id,
             message_id=event.message_id,
+            audio_bytes=audio_bytes,
+            audio_mime_type=self._resolve_input_mime_type(event)
         )
 
-        response_text = await self.chat_agent.respond(message_event)
-        if not response_text:
+        response_reply = await self.chat_agent.respond(message_event)
+        if not response_reply:
             return None
 
         try:
-            audio_bytes, audio_mime_type = await self._synthesize(response_text)
+            audio_bytes, audio_mime_type = await self.synthesize(response_reply.response)
         except Exception as exc:
             print(f"[AUDIO][TTS][ERROR] {exc}")
             return AgentReply(
-                response=self._build_audio_fallback_response(response_text, exc)
+                response=self._build_audio_fallback_response(response_reply.response, exc)
             )
 
         if not audio_bytes:
             return AgentReply(
                 response=self._build_audio_fallback_response(
-                    response_text,
+                    response_reply.response,
                     RuntimeError("Audio reply was empty"),
                 )
             )
 
         return AgentReply(
-            response=response_text,
+            response=response_reply.response,
+            requires_audio=True,
             audio_bytes=audio_bytes,
             audio_mime_type=audio_mime_type,
             audio_file_name=self._build_audio_file_name(audio_mime_type),
         )
 
-    async def _synthesize(self, response_text: str) -> tuple[bytes | None, str | None]:
+    async def synthesize(self, response_text: str) -> tuple[bytes | None, str | None]:
         response = await get_client().aio.models.generate_content(
             model=self.tts_model,
             contents=TTS_PROMPT_TEMPLATE.format(response=response_text),

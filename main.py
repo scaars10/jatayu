@@ -1,4 +1,8 @@
 import asyncio
+import warnings
+
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="nats.*")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="google.genai.*")
 
 from agent.runner import AgentReceiverRunner
 from comms.base_runner import BaseRunner

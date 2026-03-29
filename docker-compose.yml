@@ -13,8 +13,11 @@ services:
     container_name: jatayu-searxng
     ports:
       - "8080:8080"
+    env_file:
+      - .env
     volumes:
       - ./search/searxng/resources/settings.yml:/etc/searxng/settings.yml:ro
+      - ./search/searxng/resources/gemini.py:/usr/local/searxng/searx/engines/gemini.py:ro
     environment:
       - SEARXNG_SECRET=changeme123
     restart: unless-stopped

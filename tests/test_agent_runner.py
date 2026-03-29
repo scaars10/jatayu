@@ -22,7 +22,7 @@ class AgentReceiverRunnerTests(unittest.IsolatedAsyncioTestCase):
         image_agent = AsyncMock()
         audio_agent = AsyncMock()
         storage_service = AsyncMock()
-        chat_agent.respond.return_value = "hello back"
+        chat_agent.respond.return_value = AgentReply(response="hello back")
 
         runner = AgentReceiverRunner(
             nats_client=nats_client,
@@ -138,7 +138,6 @@ class AgentReceiverRunnerTests(unittest.IsolatedAsyncioTestCase):
 
             chat_agent.respond.assert_not_called()
             image_agent.respond.assert_not_called()
-            audio_agent.transcribe.assert_awaited_once()
             audio_agent.respond.assert_awaited_once()
             self.assertEqual(storage_service.record_event.await_count, 2)
             nats_client.publish_model.assert_awaited_once()
@@ -151,8 +150,6 @@ class AgentReceiverRunnerTests(unittest.IsolatedAsyncioTestCase):
             audio_path = Path(response_event.audio_file_path or "")
             self.assertTrue(audio_path.exists())
             self.assertEqual(audio_path.read_bytes(), b"voice-bytes")
-            recorded_event = storage_service.record_event.await_args_list[0].args[0]
-            self.assertEqual(recorded_event.transcript, "Please reply in audio")
 
     async def test_audio_spool_is_retained_when_publish_fails(self) -> None:
         nats_client = AsyncMock()
@@ -202,7 +199,7 @@ class AgentReceiverRunnerTests(unittest.IsolatedAsyncioTestCase):
         image_agent = AsyncMock()
         audio_agent = AsyncMock()
         storage_service = AsyncMock()
-        audio_agent.transcribe.side_effect = RuntimeError("processing blew up")
+        audio_agent.respond = AsyncMock(side_effect=RuntimeError("processing blew up"))
 
         runner = AgentReceiverRunner(
             nats_client=nats_client,
