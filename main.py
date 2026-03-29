@@ -1,16 +1,32 @@
-# This is a sample Python script.
+import asyncio
 
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
-
-
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
+from agent.runner import AgentReceiverRunner
+from comms.base_runner import BaseRunner
+from comms.telegram.runner import TelegramRunner
+from config.env_config import init_config
 
 
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
+async def run() -> None:
+    init_config()
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+    runners: list[BaseRunner] = [
+        AgentReceiverRunner(),
+        TelegramRunner(),
+    ]
+
+    try:
+        for runner in runners:
+            await runner.start()
+
+        await asyncio.Event().wait()
+    finally:
+        for runner in reversed(runners):
+            await runner.stop()
+
+
+def main() -> None:
+    asyncio.run(run())
+
+
+if __name__ == "__main__":
+    main()

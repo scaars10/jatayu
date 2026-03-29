@@ -6,3 +6,4 @@ class TelegramMessageEvent(BaseEvent):
     message: str
     channel_id: int
     sender_id: int
+    message_id: int

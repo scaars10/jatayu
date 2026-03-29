@@ -22,12 +22,6 @@ class TextHandler(MessageHandlerBase):
 
         print(f"[TEXT][{chat.title or chat_id}] {text}")
 
-        if "hello" in text.lower():
-            await context.bot.send_message(
-                chat_id=chat.id,
-                text="Hello from Jatayu",
-            )
-
     def build_event(self, update: Update) -> TelegramMessageEvent | None:
         chat = update.effective_chat
         message = update.effective_message
@@ -44,4 +38,5 @@ class TextHandler(MessageHandlerBase):
             message=message.text,
             channel_id=chat.id,
             sender_id=sender_id,
+            message_id=message.message_id,
         )

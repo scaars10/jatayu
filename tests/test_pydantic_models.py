@@ -4,6 +4,7 @@ from pydantic import ValidationError
 
 from agent.model_selector import StaticModelSelector
 from models import (
+    AgentResponseEvent,
     BaseEvent,
     TelegramAudioEvent,
     TelegramMessageEvent,
@@ -58,6 +59,7 @@ class PydanticModelTests(unittest.TestCase):
             message="hello",
             channel_id=100,
             sender_id=200,
+            message_id=300,
         )
 
         with self.assertRaises(ValidationError):
@@ -101,6 +103,7 @@ class PydanticModelTests(unittest.TestCase):
             performer="artist",
             title="track",
             file_size=8192,
+            transcript="please play this",
         )
         voice_event = TelegramAudioEvent(
             event_id="evt-voice",
@@ -116,7 +119,28 @@ class PydanticModelTests(unittest.TestCase):
 
         self.assertEqual(audio_event.media_type, "audio")
         self.assertEqual(audio_event.file_name, "clip.mp3")
+        self.assertEqual(audio_event.transcript, "please play this")
         self.assertEqual(voice_event.media_type, "voice")
+
+    def test_agent_response_event_links_back_to_request(self) -> None:
+        event = AgentResponseEvent(
+            event_id="evt-response",
+            source="agent",
+            request_event_id="evt-request",
+            channel_id=100,
+            sender_id=200,
+            reply_to_message_id=300,
+            response="hello back",
+            audio_file_path="D:/tmp/reply.wav",
+            audio_mime_type="audio/wav",
+            audio_file_name="reply.wav",
+        )
+
+        self.assertEqual(event.request_event_id, "evt-request")
+        self.assertEqual(event.reply_to_message_id, 300)
+        self.assertEqual(event.response, "hello back")
+        self.assertEqual(event.audio_file_path, "D:/tmp/reply.wav")
+        self.assertEqual(event.audio_mime_type, "audio/wav")
 
 
 if __name__ == "__main__":

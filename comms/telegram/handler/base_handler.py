@@ -3,21 +3,19 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import TypeVar
 
-from blinker import signal
-
 from telegram import Message, Update
 from telegram.ext import ContextTypes
 
-from constants import TELEGRAM_EVENT_SIGNAL_NAME
+from comms.nats import NatsClient
+from constants import TELEGRAM_EVENT_SUBJECT
 from models import BaseEvent
 
 T = TypeVar("T")
 
-# Just one instance per app run
-telegram_event_signal = signal(TELEGRAM_EVENT_SIGNAL_NAME)
-
 
 class MessageHandlerBase(ABC):
+    def __init__(self, nats_client: NatsClient) -> None:
+        self.nats_client = nats_client
 
     @abstractmethod
     def can_handle(self, message: Message) -> bool:
@@ -43,13 +41,7 @@ class MessageHandlerBase(ABC):
         if telegram_event is None:
             return
 
-        telegram_event_signal.send(
-            self,
-            telegram_event=telegram_event,
-            result=result,
-            update=update,
-            context=context,
-        )
+        await self.nats_client.publish_model(TELEGRAM_EVENT_SUBJECT, telegram_event)
 
     @staticmethod
     def build_event_id(occurred_at: datetime, chat_id: int, message_id: int) -> str:

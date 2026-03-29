@@ -1,15 +1,16 @@
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from comms.nats import NatsClient
 from comms.telegram.handler.handler_resolver import HandlerResolver
 
 
 class MessageListener:
 
-    def __init__(self, allowed_chat_ids: list[int]):
+    def __init__(self, allowed_chat_ids: list[int], nats_client: NatsClient):
 
         self.allowed_chat_ids = set(allowed_chat_ids)
-        self.resolver = HandlerResolver()
+        self.resolver = HandlerResolver(nats_client)
 
     async def on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
 

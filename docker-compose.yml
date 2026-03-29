@@ -1,0 +1,22 @@
+services:
+  nats:
+    image: nats:latest
+    container_name: jatayu-nats
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: jatayu-searxng
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./search/searxng/resources/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      - SEARXNG_SECRET=changeme123
+    restart: unless-stopped
+    depends_on:
+      - nats

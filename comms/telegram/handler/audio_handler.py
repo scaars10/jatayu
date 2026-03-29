@@ -7,7 +7,6 @@ from comms.telegram.handler.base_handler import MessageHandlerBase
 
 
 class AudioHandler(MessageHandlerBase):
-
     def can_handle(self, message: Message) -> bool:
         return bool(message.voice or message.audio)
 
@@ -24,11 +23,6 @@ class AudioHandler(MessageHandlerBase):
 
         if message.audio:
             print(f"[AUDIO][{chat.title or chat.id}] title={message.audio.title}")
-
-        await context.bot.send_message(
-            chat_id=chat.id,
-            text="Audio received"
-        )
 
     def build_event(self, update: Update) -> TelegramAudioEvent | None:
         chat = update.effective_chat

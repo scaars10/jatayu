@@ -18,3 +18,4 @@ class TelegramAudioEvent(BaseEvent):
     performer: str | None = None
     title: str | None = None
     file_size: int | None = None
+    transcript: str | None = None

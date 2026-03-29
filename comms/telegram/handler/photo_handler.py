@@ -7,7 +7,6 @@ from comms.telegram.handler.base_handler import MessageHandlerBase
 
 
 class PhotoHandler(MessageHandlerBase):
-
     def can_handle(self, message: Message) -> bool:
         return bool(message.photo)
 
@@ -25,11 +24,6 @@ class PhotoHandler(MessageHandlerBase):
         print(
             f"[PHOTO][{chat.title or chat.id}] "
             f"id={photo.file_id} caption={caption}"
-        )
-
-        await context.bot.send_message(
-            chat_id=chat.id,
-            text="Photo received"
         )
 
     def build_event(self, update: Update) -> TelegramPhotoEvent | None:

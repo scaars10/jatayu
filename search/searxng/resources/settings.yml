@@ -1,0 +1,49 @@
+use_default_settings: true
+
+general:
+  instance_name: "Jatayu Search"
+
+search:
+  safe_search: 1
+  autocomplete: ""
+  formats:
+    - html
+    - json
+
+server:
+  port: 8080
+  bind_address: "0.0.0.0"
+  secret_key: "changeme123"
+
+redis:
+  url: false
+
+engines:
+  - name: wikipedia
+    disabled: false
+
+  - name: wikidata
+    disabled: false
+
+  - name: stackoverflow
+    disabled: false
+
+  - name: brave api
+    engine: braveapi
+    disabled: false
+    api_key: "YOUR_BRAVE_API_KEY"
+
+  - name: duckduckgo
+    disabled: true
+
+  - name: google
+    disabled: true
+
+  - name: bing
+    disabled: true
+
+  - name: startpage
+    disabled: true
+
+  - name: brave
+    disabled: true
