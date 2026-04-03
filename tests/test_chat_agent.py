@@ -11,6 +11,8 @@ from storage import ConversationTurn, LongTermMemoryRecord
 class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
     async def test_respond_includes_recent_context_from_storage(self) -> None:
         storage_service = AsyncMock()
+        storage_service.knowledge_graph = MagicMock()
+        storage_service.knowledge_graph.search_graph.return_value = {}
         storage_service.get_conversation_context.return_value = [
             ConversationTurn(
                 role="user",
@@ -91,12 +93,14 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(prompt.endswith("assistant:"))
 
     def test_build_prompt_falls_back_to_current_message_when_history_is_empty(self) -> None:
-        prompt = ChatAgent._build_prompt([], [], "hello")
+        prompt = ChatAgent._build_prompt([], [], {}, "hello")
 
         self.assertEqual(prompt, "hello")
 
     async def test_respond_triggers_deep_research_tool(self) -> None:
         storage_service = AsyncMock()
+        storage_service.knowledge_graph = MagicMock()
+        storage_service.knowledge_graph.search_graph.return_value = {}
         storage_service.get_conversation_context.return_value = []
         storage_service.get_long_term_memories.return_value = []
         memory_manager = AsyncMock()
@@ -129,6 +133,8 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_respond_triggers_get_research_task_status_tool(self) -> None:
         storage_service = AsyncMock()
+        storage_service.knowledge_graph = MagicMock()
+        storage_service.knowledge_graph.search_graph.return_value = {}
         storage_service.get_conversation_context.return_value = []
         storage_service.get_long_term_memories.return_value = []
         memory_manager = AsyncMock()
@@ -162,6 +168,8 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_respond_triggers_provide_feedback_to_research_task_tool(self) -> None:
         storage_service = AsyncMock()
+        storage_service.knowledge_graph = MagicMock()
+        storage_service.knowledge_graph.search_graph.return_value = {}
         storage_service.get_conversation_context.return_value = []
         storage_service.get_long_term_memories.return_value = []
         memory_manager = AsyncMock()
@@ -195,6 +203,8 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_respond_triggers_continue_research_task_tool(self) -> None:
         storage_service = AsyncMock()
+        storage_service.knowledge_graph = MagicMock()
+        storage_service.knowledge_graph.search_graph.return_value = {}
         storage_service.get_conversation_context.return_value = []
         storage_service.get_long_term_memories.return_value = []
         memory_manager = AsyncMock()
@@ -229,6 +239,8 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_respond_triggers_read_pdf_tool(self) -> None:
         storage_service = AsyncMock()
+        storage_service.knowledge_graph = MagicMock()
+        storage_service.knowledge_graph.search_graph.return_value = {}
         storage_service.get_conversation_context.return_value = []
         storage_service.get_long_term_memories.return_value = []
         memory_manager = AsyncMock()

@@ -121,3 +121,22 @@ class ResearchTaskRecord:
     feedback: str | None
     created_at: datetime
     updated_at: datetime
+
+@dataclass(frozen=True, slots=True)
+class KGNodeRecord:
+    id: int
+    name: str
+    type: str
+    attributes: str | None
+    created_at: datetime
+    updated_at: datetime
+
+@dataclass(frozen=True, slots=True)
+class KGEdgeRecord:
+    id: int
+    source_node_id: int
+    target_node_id: int
+    relation: str
+    attributes: str | None
+    created_at: datetime
+    updated_at: datetime

@@ -17,6 +17,9 @@ from config.env_config import get_env, init_config
 from models import TelegramMessageEvent
 from storage import ConversationTurn, LongTermMemoryRecord, StorageService
 
+from agent.knowledge_graph import KnowledgeGraphProcessor
+import asyncio
+
 class AgentOutput(BaseModel):
     response: str = Field(description="The text response to the user.")
     requires_audio: bool = Field(default=False, description="Set to true if the user explicitly asked for an audio response or voice note.")
@@ -33,6 +36,9 @@ class ChatAgent(BaseAgent):
         self.history_limit = history_limit
         self.memory_limit = memory_limit
         self._logger = logging.getLogger(__name__)
+        
+        self.kg_processor = KnowledgeGraphProcessor(storage_service) if storage_service else None
+        
         if memory_manager is not None:
             self.memory_manager = memory_manager
         elif storage_service is not None:
@@ -69,7 +75,9 @@ class ChatAgent(BaseAgent):
     async def respond(self, event: TelegramMessageEvent) -> AgentReply | None:
         history: list[ConversationTurn] = []
         memories: list[LongTermMemoryRecord] = []
+        graph_context = {}
         contents = event.message
+        
         if self.storage_service is not None:
             history = await self.storage_service.get_conversation_context(
                 event.channel_id,
@@ -80,18 +88,32 @@ class ChatAgent(BaseAgent):
                 event.sender_id,
                 limit=self.memory_limit,
             )
-            contents = self._build_prompt(history, memories, event.message)
+            
+            # Simple keyword search on the graph for contextual retrieval
+            if self.storage_service.knowledge_graph:
+                words = [w.strip() for w in event.message.split() if len(w) > 4]
+                for word in words[:3]:
+                    res = self.storage_service.knowledge_graph.search_graph(word)
+                    if res and res.get("query_nodes"):
+                        graph_context[word] = res
+            
+            contents = self._build_prompt(history, memories, graph_context, event.message)
 
         result = await self._generate_response(contents, event)
-        if result and self.memory_manager is not None:
-            try:
-                await self.memory_manager.remember_text_exchange(
-                    event,
-                    result.response,
-                    history=history,
-                )
-            except Exception as exc:
-                print(f"[MEMORY][ERROR] {exc}")
+        if result:
+            if self.memory_manager is not None:
+                try:
+                    await self.memory_manager.remember_text_exchange(
+                        event,
+                        result.response,
+                        history=history,
+                    )
+                except Exception as exc:
+                    self._logger.error(f"[MEMORY][ERROR] {exc}")
+                    
+            if self.kg_processor is not None:
+                # Run the KG extraction in the background
+                asyncio.create_task(self.kg_processor.extract_and_store(event.message, history))
 
         if not result:
             return None
@@ -114,7 +136,6 @@ class ChatAgent(BaseAgent):
         prompt_parts.append(contents)
 
         # Pydantic AI Agent Run
-        # We can optionally pass tools or deps here if needed in the future
         result = await self.agent.run(prompt_parts, deps=event)
         return result.output
 
@@ -122,13 +143,14 @@ class ChatAgent(BaseAgent):
     def _build_prompt(
         history: list[ConversationTurn],
         memories: list[LongTermMemoryRecord],
+        graph_context: dict,
         current_message: str,
     ) -> str:
-        if not history and not memories:
+        if not history and not memories and not graph_context:
             return current_message
 
         lines = [
-            "Use the long-term memory and recent conversation context below when relevant, then reply to the latest user message.",
+            "Use the long-term memory, knowledge graph, and recent conversation context below when relevant, then reply to the latest user message.",
         ]
         if memories:
             lines.append("Long-term memory:")
@@ -136,6 +158,16 @@ class ChatAgent(BaseAgent):
                 lines.append(
                     f"- [{memory.scope_type}/{memory.importance}] {memory.summary}"
                 )
+                
+        if graph_context:
+            lines.append("Knowledge Graph Context (Second Brain):")
+            for term, data in graph_context.items():
+                for node in data.get("query_nodes", []):
+                    lines.append(f"- Entity: {node['name']} ({node['type']})")
+                for edge in data.get("edges", []):
+                    lines.append(f"  - Relation: {edge['relation']}")
+                for rel_node in data.get("related_nodes", []):
+                    lines.append(f"  - Connected Entity: {rel_node['name']} ({rel_node['type']})")
 
         if history:
             lines.append("Recent conversation:")
