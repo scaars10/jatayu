@@ -20,6 +20,7 @@ from storage.repositories import (
     LongTermMemoryRepository,
     MessageRepository,
     ParticipantRepository,
+    ResearchTaskRepository,
 )
 
 
@@ -34,6 +35,7 @@ class StorageService:
         self.messages: MessageRepository | None = None
         self.attachments: AttachmentRepository | None = None
         self.long_term_memories: LongTermMemoryRepository | None = None
+        self.research_tasks: ResearchTaskRepository | None = None
 
     async def start(self) -> None:
         async with self._lock:
@@ -48,6 +50,7 @@ class StorageService:
             self.messages = MessageRepository(connection)
             self.attachments = AttachmentRepository(connection)
             self.long_term_memories = LongTermMemoryRepository(connection)
+            self.research_tasks = ResearchTaskRepository(connection)
             self._started = True
 
     async def close(self) -> None:
@@ -62,6 +65,7 @@ class StorageService:
             self.messages = None
             self.attachments = None
             self.long_term_memories = None
+            self.research_tasks = None
             self._started = False
 
     async def record_event(
@@ -312,6 +316,7 @@ class StorageService:
             or self.messages is None
             or self.attachments is None
             or self.long_term_memories is None
+            or self.research_tasks is None
         ):
             raise RuntimeError("Storage service has not been started")
 
@@ -322,6 +327,7 @@ class StorageService:
             "long_term_memories": self.long_term_memories,
             "messages": self.messages,
             "participants": self.participants,
+            "research_tasks": self.research_tasks,
         }
 
     @staticmethod

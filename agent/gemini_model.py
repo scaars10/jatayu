@@ -8,7 +8,7 @@ from .model_selector import StaticModelSelector
 
 LIGHT_MODEL = "gemini-3.1-flash-lite-preview"
 BALANCED_MODEL = "gemini-3-flash-preview"
-LARGE_MODEL = "gemini-3.1-pro-preview"
+LARGE_MODEL = "gemini-2.5-pro"
 
 _client: genai.Client | None = None
 

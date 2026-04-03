@@ -1,0 +1,14 @@
+google-genai>=1.67.0
+httpx>=0.28.1
+ipykernel>=7.2.0
+nats-py>=2.14.0
+pydantic>=2.12.5
+pydantic-ai[google]>=1.73.0
+python-dotenv>=1.2.2
+python-telegram-bot>=22.6
+pypdf>=4.3.1
+duckduckgo-search>=6.1.8
+
+[dev]
+pytest>=8.3.2
+pytest-asyncio>=0.23.8

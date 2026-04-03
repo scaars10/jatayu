@@ -4,11 +4,12 @@ import logging
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, BinaryContent, RunContext
-from pydantic_ai.builtin_tools import WebSearchTool
+from agent.research_steps import web_search
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 
 from agent.base_agent import AgentReply, BaseAgent
+from agent.deep_research_agent import start_deep_research_task, get_research_task_status, provide_feedback_to_research_task, continue_research_task, read_pdf
 from agent.gemini_model import gemini_model
 from agent.long_term_memory import LongTermMemoryManager
 from agent.tool_manager import SYSTEM_INSTRUCTION
@@ -50,7 +51,15 @@ class ChatAgent(BaseAgent):
                 provider=GoogleProvider(api_key=api_key),
             ),
             system_prompt=SYSTEM_INSTRUCTION,
-            builtin_tools=[WebSearchTool()],
+            deps_type=TelegramMessageEvent,
+            tools=[
+                web_search,
+                start_deep_research_task,
+                get_research_task_status,
+                provide_feedback_to_research_task,
+                continue_research_task,
+                read_pdf
+            ],
             output_type=AgentOutput,
         )
 
@@ -73,7 +82,7 @@ class ChatAgent(BaseAgent):
             )
             contents = self._build_prompt(history, memories, event.message)
 
-        result = await self._generate_response(contents, event.audio_bytes, event.audio_mime_type)
+        result = await self._generate_response(contents, event)
         if result and self.memory_manager is not None:
             try:
                 await self.memory_manager.remember_text_exchange(
@@ -95,19 +104,18 @@ class ChatAgent(BaseAgent):
     async def _generate_response(
         self, 
         contents: str, 
-        audio_bytes: bytes | None, 
-        audio_mime_type: str | None
+        event: TelegramMessageEvent
     ) -> AgentOutput | None:
         
         prompt_parts = []
-        if audio_bytes and audio_mime_type:
-            prompt_parts.append(BinaryContent(data=audio_bytes, media_type=audio_mime_type))
+        if event.audio_bytes and event.audio_mime_type:
+            prompt_parts.append(BinaryContent(data=event.audio_bytes, media_type=event.audio_mime_type))
             
         prompt_parts.append(contents)
 
         # Pydantic AI Agent Run
         # We can optionally pass tools or deps here if needed in the future
-        result = await self.agent.run(prompt_parts)
+        result = await self.agent.run(prompt_parts, deps=event)
         return result.output
 
     @staticmethod

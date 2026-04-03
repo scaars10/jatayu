@@ -108,3 +108,16 @@ class LongTermMemoryRecord:
     last_observed_at: datetime
     created_at: datetime
     updated_at: datetime
+
+@dataclass(frozen=True, slots=True)
+class ResearchTaskRecord:
+    id: int
+    topic: str
+    specific_questions: str | None
+    status: str
+    step: str | None
+    sources_content: str | None
+    report: str | None
+    feedback: str | None
+    created_at: datetime
+    updated_at: datetime

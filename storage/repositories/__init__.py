@@ -4,6 +4,7 @@ from .conversations import ConversationRepository
 from .long_term_memories import LongTermMemoryRepository
 from .messages import MessageRepository
 from .participants import ParticipantRepository
+from .research_tasks import ResearchTaskRepository
 
 __all__ = [
     "AttachmentRepository",
@@ -12,4 +13,5 @@ __all__ = [
     "LongTermMemoryRepository",
     "MessageRepository",
     "ParticipantRepository",
+    "ResearchTaskRepository",
 ]
