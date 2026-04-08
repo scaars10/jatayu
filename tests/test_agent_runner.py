@@ -187,8 +187,9 @@ class AgentReceiverRunnerTests(unittest.IsolatedAsyncioTestCase):
                 duration_seconds=42,
             ).model_dump(mode="json")
 
-            with self.assertRaises(RuntimeError):
-                await runner.handle_payload(payload)
+            # In the new implementation, handle_payload catches and logs errors
+            # instead of letting them bubble up.
+            await runner.handle_payload(payload)
 
             files = list(Path(temp_dir).iterdir())
             self.assertEqual(len(files), 1)

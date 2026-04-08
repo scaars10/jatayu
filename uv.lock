@@ -1011,7 +1011,7 @@ requires-dist = [
     { name = "ipykernel", specifier = ">=7.2.0" },
     { name = "nats-py", specifier = ">=2.14.0" },
     { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "pydantic-ai", extras = ["google"], specifier = ">=1.73.0" },
+    { name = "pydantic-ai", specifier = ">=1.73.0" },
     { name = "pypdf", specifier = ">=4.3.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.2" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.8" },

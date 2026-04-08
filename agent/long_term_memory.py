@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from agent.compressor import global_compression_state
 from agent.gemini_model import gemini_model, get_client
 from models import TelegramMessageEvent
 from storage import ConversationTurn, LongTermMemoryRecord, StorageService
@@ -46,6 +47,9 @@ class LongTermMemoryManager:
         history: list[ConversationTurn] | None = None,
     ) -> list[LongTermMemoryRecord]:
         if not event.message.strip() or not response_text.strip():
+            return []
+
+        if self._is_research_related_exchange(event.message, response_text):
             return []
 
         existing_memories = await self.storage_service.get_long_term_memories(
@@ -101,7 +105,67 @@ class LongTermMemoryManager:
             )
             stored.append(record)
 
+        if stored:
+            global_compression_state.increment_updates(len(stored))
+
         return stored
+
+    @staticmethod
+    def _is_research_related_exchange(user_message: str, assistant_response: str) -> bool:
+        user_text = user_message.strip().lower()
+        assistant_text = assistant_response.strip().lower()
+        combined_text = f"{user_text}\n{assistant_text}"
+
+        response_markers = (
+            "started deep research",
+            "started continuous research",
+            "continuous research",
+            "deep research",
+            "research task",
+            "gathering sources for your research",
+            "reading sources for your research",
+            "synthesizing the report for your research",
+            "provide feedback or tell me to continue",
+            "continue to the final report",
+            "i will keep working in the background",
+            "i will keep looking in the background",
+        )
+        if any(marker in combined_text for marker in response_markers):
+            return True
+
+        if "sources:" in assistant_text and ("http://" in assistant_text or "https://" in assistant_text):
+            return True
+
+        if assistant_text.count("http://") + assistant_text.count("https://") >= 2:
+            return True
+
+        task_setup_patterns = (
+            r"\bkeep searching\b",
+            r"\bkeep looking\b",
+            r"\bmonitor\b",
+            r"\btrack\b",
+            r"\bwatch for updates\b",
+            r"\bnotify me\b",
+            r"\balert me\b",
+        )
+        domain_patterns = (
+            r"\bflat\b",
+            r"\bflats\b",
+            r"\bapartment\b",
+            r"\bapartments\b",
+            r"\bproperty\b",
+            r"\bproperties\b",
+            r"\blisting\b",
+            r"\blistings\b",
+            r"\bnews\b",
+            r"\bupdates\b",
+        )
+        if any(re.search(pattern, user_text) for pattern in task_setup_patterns) and any(
+            re.search(pattern, user_text) for pattern in domain_patterns
+        ):
+            return True
+
+        return False
 
     @staticmethod
     def _build_extraction_prompt(
@@ -118,11 +182,20 @@ class LongTermMemoryManager:
             "### CRITERIA FOR REMEMBERING",
             "- DURABILITY: Information that will remain true and relevant for weeks or months.",
             "- UTILITY: Facts that help the assistant provide more personalized or context-aware help.",
+            "- PERSONAL FOCUS: ONLY extract information that the USER has shared about themselves, their preferences, their life, or their projects.",
+            "- IGNORE RESEARCH: DO NOT extract information from research reports, web search results, or general knowledge that the assistant has provided (e.g., apartment listings, technical documentation, news summaries, recipes, general facts). Only remember these if the user explicitly adopts them as a personal plan or preference.",
             "- EXAMPLES TO REMEMBER: User preferences, long-running projects, names of people/places, recurring tasks, hard constraints, and significant personal/professional milestones.",
             "- EXAMPLES TO IGNORE: One-off questions ('How do I fix this syntax error?'), temporary requests ('Summarize this link', 'What is the weather in London?'), generic small talk ('How are you?', 'Thanks for help'), specific code snippets that are context-dependent, and details that will be irrelevant by tomorrow.",
             "",
+            "### DEDUPLICATION & UPDATING",
+            "1. Review the 'Existing memories' list below.",
+            "2. If a new fact relates to an existing memory, REUSE the exact 'memory_key' to update it.",
+            "3. If a new fact is already covered by an existing memory and provides no new information, DO NOT extract it.",
+            "4. If a new fact contradicts an existing memory, extract it with the same 'memory_key' - the system will update the summary.",
+            "",
             "### DURABILITY CHECK",
             "Before adding a memory, ask yourself: 'Will the assistant still need to know this in 2 weeks?' If the answer is 'No', do not add it.",
+            "",
             "### OUTPUT FORMAT",
             "Return strict JSON with this shape:",
             "{",

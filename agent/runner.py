@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from uuid import uuid4
 
 from google.genai import errors as genai_errors
@@ -20,6 +22,7 @@ from storage import AudioArtifactStore, StorageService
 
 from agent.chat_agent import ChatAgent
 from agent.image_agent import ImageAgent
+from agent.message_queue import MessageQueue
 
 
 AGENT_PARTICIPANT_ID = 0
@@ -34,6 +37,7 @@ class AgentReceiverRunner(BaseRunner):
         audio_agent: AudioAgent | None = None,
         audio_artifact_store: AudioArtifactStore | None = None,
         storage_service: StorageService | None = None,
+        message_queue: MessageQueue | None = None,
     ) -> None:
         self.nats_client = nats_client or build_nats_client()
         self.storage_service = storage_service or StorageService()
@@ -41,6 +45,9 @@ class AgentReceiverRunner(BaseRunner):
         self.image_agent = image_agent or ImageAgent()
         self.audio_agent = audio_agent or AudioAgent(chat_agent=self.chat_agent)
         self.audio_artifact_store = audio_artifact_store or AudioArtifactStore()
+        self.message_queue = message_queue or MessageQueue()
+        self._retry_task: asyncio.Task | None = None
+        self._logger = logging.getLogger(__name__)
 
     async def start(self) -> None:
         await self.storage_service.start()
@@ -49,8 +56,16 @@ class AgentReceiverRunner(BaseRunner):
         await self.image_agent.start()
         await self.audio_agent.start()
         await self.nats_client.subscribe_json(TELEGRAM_EVENT_SUBJECT, self.handle_payload)
+        self._retry_task = asyncio.create_task(self._retry_queued_messages())
 
     async def stop(self) -> None:
+        if self._retry_task:
+            self._retry_task.cancel()
+            try:
+                await self._retry_task
+            except asyncio.CancelledError:
+                pass
+
         await self.audio_agent.stop()
         await self.image_agent.stop()
         await self.chat_agent.stop()
@@ -64,18 +79,24 @@ class AgentReceiverRunner(BaseRunner):
 
         try:
             await self.storage_service.record_event(event)
-
-            if isinstance(event, TelegramMessageEvent):
-                response = await self.chat_agent.respond(event)
-            elif isinstance(event, TelegramPhotoEvent):
-                response = await self.image_agent.respond(event)
-            elif isinstance(event, TelegramAudioEvent):
-                response = await self.audio_agent.respond(event)
-            else:
-                return
+            await self._process_event(event)
         except Exception as exc:
+            if self._is_retryable(exc):
+                self._logger.warning(f"[AGENT][RETRYABLE][{event.event_id}] {exc}")
+                await self.message_queue.add(event)
+                return
+
             print(f"[AGENT][ERROR][{event.event_id}] {exc}")
             await self._publish_failure_response(event, exc)
+
+    async def _process_event(self, event: TelegramMessageEvent | TelegramPhotoEvent | TelegramAudioEvent) -> None:
+        if isinstance(event, TelegramMessageEvent):
+            response = await self.chat_agent.respond(event)
+        elif isinstance(event, TelegramPhotoEvent):
+            response = await self.image_agent.respond(event)
+        elif isinstance(event, TelegramAudioEvent):
+            response = await self.audio_agent.respond(event)
+        else:
             return
 
         reply = self._normalize_reply(response)
@@ -99,6 +120,43 @@ class AgentReceiverRunner(BaseRunner):
         response_event = self._build_response_event(event, reply)
         await self.storage_service.record_event(response_event, channel_source=event.source)
         await self.nats_client.publish_model(AGENT_RESPONSE_SUBJECT, response_event)
+
+    def _is_retryable(self, exc: Exception) -> bool:
+        if isinstance(exc, genai_errors.ServerError):
+            return True
+        if isinstance(exc, pydantic_ai_errors.ModelHTTPError):
+            if exc.status_code in {503, 429}:
+                return True
+        return False
+
+    async def _retry_queued_messages(self) -> None:
+        while True:
+            try:
+                await asyncio.sleep(30)  # Check every 30 seconds
+                await self.message_queue.cleanup_expired()
+                
+                channels = await self.message_queue.get_all_channels()
+                for channel_id in channels:
+                    event = await self.message_queue.pop_latest_for_channel(channel_id)
+                    if not event:
+                        continue
+                    
+                    self._logger.info(f"[AGENT][RETRY] Retrying latest event for channel {channel_id}")
+                    try:
+                        await self._process_event(event)
+                    except Exception as exc:
+                        if self._is_retryable(exc):
+                            # Put it back if still retryable
+                            self._logger.info(f"[AGENT][RETRY] Still failing for channel {channel_id}, re-queueing")
+                            await self.message_queue.add(event)
+                        else:
+                            self._logger.error(f"[AGENT][RETRY][ERROR] Non-retryable error during retry: {exc}")
+                            await self._publish_failure_response(event, exc)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                self._logger.error(f"[AGENT][RETRY][LOOP][ERROR] {exc}")
+
 
     @staticmethod
     def _build_event(payload: dict[str, object]):

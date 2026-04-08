@@ -1,18 +1,34 @@
 import unittest
 from datetime import datetime, timezone
 from unittest import mock
-from unittest.mock import AsyncMock, MagicMock, patch, ANY
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from agent.chat_agent import AgentOutput, ChatAgent
+from agent.continuous_state import ContinuousTask
+from agent.tool_manager import SYSTEM_INSTRUCTION
 from models import TelegramMessageEvent
 from storage import ConversationTurn, LongTermMemoryRecord
 
 
 class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
+    def test_system_instruction_prefers_continuous_research_for_ongoing_monitoring(self) -> None:
+        self.assertIn("Prefer `start_continuous_research`", SYSTEM_INSTRUCTION)
+        self.assertIn("keep searching", SYSTEM_INSTRUCTION)
+        self.assertIn("Real-estate or apartment-hunting", SYSTEM_INSTRUCTION)
+        self.assertIn("Telegram-friendly", SYSTEM_INSTRUCTION)
+
+    def test_sanitize_response_text_removes_internal_call_artifacts(self) -> None:
+        dirty = (
+            'Quick summary for you."}call:default_api:final_result'
+            '{requires_audio:false,response:'
+        )
+
+        cleaned = ChatAgent._sanitize_response_text(dirty)
+
+        self.assertEqual(cleaned, "Quick summary for you.")
+
     async def test_respond_includes_recent_context_from_storage(self) -> None:
         storage_service = AsyncMock()
-        storage_service.knowledge_graph = MagicMock()
-        storage_service.knowledge_graph.search_graph.return_value = {}
         storage_service.get_conversation_context.return_value = [
             ConversationTurn(
                 role="user",
@@ -93,14 +109,102 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(prompt.endswith("assistant:"))
 
     def test_build_prompt_falls_back_to_current_message_when_history_is_empty(self) -> None:
-        prompt = ChatAgent._build_prompt([], [], {}, "hello")
+        prompt = ChatAgent._build_prompt([], [], "hello")
 
         self.assertEqual(prompt, "hello")
 
+    async def test_respond_routes_ongoing_property_search_directly_to_continuous_research(self) -> None:
+        storage_service = AsyncMock()
+        storage_service.get_conversation_context.return_value = []
+        storage_service.get_long_term_memories.return_value = []
+        memory_manager = AsyncMock()
+        mock_run = AsyncMock()
+        mock_run.return_value = MagicMock(output=AgentOutput(response="should not be used", requires_audio=False))
+
+        with patch("agent.chat_agent.get_env", return_value="fake_key"), \
+             patch("pydantic_ai.Agent.run", mock_run), \
+             patch(
+                 "agent.chat_agent.start_continuous_research",
+                 new=AsyncMock(return_value="Started continuous research on 'flats near Embassy Tech Village'. Task ID is cr_test1234."),
+             ) as start_continuous:
+            agent = ChatAgent(
+                storage_service=storage_service,
+                memory_manager=memory_manager,
+            )
+            event = TelegramMessageEvent(
+                event_id="evt-continuous-route",
+                source="telegram",
+                message="I am looking for flats near Embassy Tech Village and my budget is 2-4 cr. I want to keep on searching for properties that are good value.",
+                channel_id=106,
+                sender_id=206,
+                message_id=306,
+            )
+
+            response = await agent.respond(event)
+
+        self.assertIn("Started continuous research", response.response)
+        start_continuous.assert_awaited_once()
+        mock_run.assert_not_awaited()
+        memory_manager.remember_text_exchange.assert_awaited_once()
+
+    async def test_respond_routes_continuous_feedback_directly_to_feedback_tool(self) -> None:
+        storage_service = AsyncMock()
+        storage_service.get_conversation_context.return_value = []
+        storage_service.get_long_term_memories.return_value = []
+        memory_manager = AsyncMock()
+        mock_run = AsyncMock()
+        mock_run.return_value = MagicMock(output=AgentOutput(response="should not be used", requires_audio=False))
+
+        active_task = ContinuousTask(
+            task_id="cr_feedback01",
+            topic="flats near Embassy Tech Village",
+            instructions="Track good value 3.5BHK and 4BHK properties",
+            status="running",
+            source_event_id="evt-start",
+            source_message_id=305,
+            source_channel_id=106,
+            event_dict={
+                "event_id": "evt-start",
+                "source": "telegram",
+                "message": "track this",
+                "channel_id": 106,
+                "sender_id": 206,
+                "message_id": 305,
+            },
+        )
+
+        with patch("agent.chat_agent.get_env", return_value="fake_key"), \
+             patch("pydantic_ai.Agent.run", mock_run), \
+             patch(
+                 "agent.chat_agent.update_continuous_research_plan",
+                 new=AsyncMock(return_value="Wrote feedback for task cr_feedback01 to 'feedback.md'. Triggered a new research cycle to process it."),
+             ) as update_feedback, \
+             patch(
+                 "agent.chat_agent.global_continuous_state.get_all_tasks",
+                 return_value=[active_task],
+             ):
+            agent = ChatAgent(
+                storage_service=storage_service,
+                memory_manager=memory_manager,
+            )
+            event = TelegramMessageEvent(
+                event_id="evt-feedback-direct",
+                source="telegram",
+                message="Ok if 10+ floor makes sense then you can keep it in plan. But i dont want to exclude servant room configs if they are value for money. I dont have any preference for with or without servant rooms",
+                channel_id=106,
+                sender_id=206,
+                message_id=306,
+            )
+
+            response = await agent.respond(event)
+
+        self.assertIn("Wrote feedback for task cr_feedback01", response.response)
+        update_feedback.assert_awaited_once()
+        mock_run.assert_not_awaited()
+        memory_manager.remember_text_exchange.assert_awaited_once()
+
     async def test_respond_triggers_deep_research_tool(self) -> None:
         storage_service = AsyncMock()
-        storage_service.knowledge_graph = MagicMock()
-        storage_service.knowledge_graph.search_graph.return_value = {}
         storage_service.get_conversation_context.return_value = []
         storage_service.get_long_term_memories.return_value = []
         memory_manager = AsyncMock()
@@ -133,8 +237,6 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_respond_triggers_get_research_task_status_tool(self) -> None:
         storage_service = AsyncMock()
-        storage_service.knowledge_graph = MagicMock()
-        storage_service.knowledge_graph.search_graph.return_value = {}
         storage_service.get_conversation_context.return_value = []
         storage_service.get_long_term_memories.return_value = []
         memory_manager = AsyncMock()
@@ -168,8 +270,6 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_respond_triggers_provide_feedback_to_research_task_tool(self) -> None:
         storage_service = AsyncMock()
-        storage_service.knowledge_graph = MagicMock()
-        storage_service.knowledge_graph.search_graph.return_value = {}
         storage_service.get_conversation_context.return_value = []
         storage_service.get_long_term_memories.return_value = []
         memory_manager = AsyncMock()
@@ -203,8 +303,6 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_respond_triggers_continue_research_task_tool(self) -> None:
         storage_service = AsyncMock()
-        storage_service.knowledge_graph = MagicMock()
-        storage_service.knowledge_graph.search_graph.return_value = {}
         storage_service.get_conversation_context.return_value = []
         storage_service.get_long_term_memories.return_value = []
         memory_manager = AsyncMock()
@@ -239,8 +337,6 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_respond_triggers_read_pdf_tool(self) -> None:
         storage_service = AsyncMock()
-        storage_service.knowledge_graph = MagicMock()
-        storage_service.knowledge_graph.search_graph.return_value = {}
         storage_service.get_conversation_context.return_value = []
         storage_service.get_long_term_memories.return_value = []
         memory_manager = AsyncMock()

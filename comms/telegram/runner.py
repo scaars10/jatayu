@@ -1,7 +1,10 @@
 import mimetypes
+import re
 
 from comms.base_runner import BaseRunner
 from telegram import InputFile
+from telegram.constants import ParseMode
+from telegram.error import BadRequest
 from telegram.ext import ApplicationBuilder, MessageHandler, filters
 
 from comms.nats import NatsClient, build_nats_client
@@ -13,6 +16,12 @@ from storage import AudioArtifactStore, StorageService
 
 
 class TelegramRunner(BaseRunner):
+    _TABLE_SEPARATOR_RE = re.compile(r"^:?-{3,}:?$")
+    _INTERNAL_TOOL_CALL_RE = re.compile(
+        r'["\'}\]]*\s*call:[^:\s{}]+(?::[^:\s{}]+)*:final_result\{.*$',
+        flags=re.DOTALL,
+    )
+
     def __init__(
         self,
         nats_client: NatsClient | None = None,
@@ -82,9 +91,38 @@ class TelegramRunner(BaseRunner):
                 provider_message_id=sent_message.message_id,
             )
 
+    async def _send_text_in_chunks(self, chat_id: int, text: str, reply_to_message_id: int | None):
+        max_length = 4000
+        if not text:
+            return await self.application.bot.send_message(
+                chat_id=chat_id,
+                text="*",
+                reply_to_message_id=reply_to_message_id,
+            )
+
+        formatted_text = self._format_for_telegram(text)
+        sent_message = None
+        for i in range(0, len(formatted_text), max_length):
+            chunk = formatted_text[i:i + max_length]
+            try:
+                sent_message = await self.application.bot.send_message(
+                    chat_id=chat_id,
+                    text=chunk,
+                    reply_to_message_id=reply_to_message_id if i == 0 else None,
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+            except BadRequest:
+                # Fallback to plain text if markdown parsing fails
+                sent_message = await self.application.bot.send_message(
+                    chat_id=chat_id,
+                    text=chunk,
+                    reply_to_message_id=reply_to_message_id if i == 0 else None,
+                )
+        return sent_message
+
     async def _send_agent_response(self, event: AgentResponseEvent):
         if not event.audio_file_path:
-            return await self.application.bot.send_message(
+            return await self._send_text_in_chunks(
                 chat_id=event.channel_id,
                 text=event.response,
                 reply_to_message_id=event.reply_to_message_id,
@@ -112,21 +150,38 @@ class TelegramRunner(BaseRunner):
         try:
             with audio_file_path.open("rb") as audio_file:
                 input_file = InputFile(audio_file, filename=file_name)
+                
+                formatted_caption = self._format_for_telegram(caption) if caption else None
 
-                if is_voice_note:
-                    return await self.application.bot.send_voice(
+                kwargs = {
+                    "chat_id": event.channel_id,
+                    "caption": formatted_caption,
+                    "reply_to_message_id": event.reply_to_message_id,
+                    "parse_mode": ParseMode.MARKDOWN if formatted_caption else None,
+                }
+
+                try:
+                    if is_voice_note:
+                        msg = await self.application.bot.send_voice(voice=input_file, **kwargs)
+                    else:
+                        msg = await self.application.bot.send_audio(audio=input_file, **kwargs)
+                except BadRequest:
+                    audio_file.seek(0)
+                    kwargs["caption"] = caption
+                    kwargs["parse_mode"] = None
+                    if is_voice_note:
+                        msg = await self.application.bot.send_voice(voice=input_file, **kwargs)
+                    else:
+                        msg = await self.application.bot.send_audio(audio=input_file, **kwargs)
+                
+                # If we had to omit the caption because it was too long, send the full text separately
+                if caption is None and event.response:
+                    await self._send_text_in_chunks(
                         chat_id=event.channel_id,
-                        voice=input_file,
-                        caption=caption,
-                        reply_to_message_id=event.reply_to_message_id,
+                        text=event.response,
+                        reply_to_message_id=msg.message_id
                     )
-
-                return await self.application.bot.send_audio(
-                    chat_id=event.channel_id,
-                    audio=input_file,
-                    caption=caption,
-                    reply_to_message_id=event.reply_to_message_id,
-                )
+                return msg
         except Exception:
             return await self._send_audio_fallback(
                 event,
@@ -138,7 +193,7 @@ class TelegramRunner(BaseRunner):
         event: AgentResponseEvent,
         notice: str,
     ):
-        return await self.application.bot.send_message(
+        return await self._send_text_in_chunks(
             chat_id=event.channel_id,
             text=f"{notice}\n\n{event.response}",
             reply_to_message_id=event.reply_to_message_id,
@@ -174,3 +229,103 @@ class TelegramRunner(BaseRunner):
             return True
 
         return normalized_name.endswith(".ogg") or normalized_name.endswith(".opus")
+
+    @staticmethod
+    def _format_for_telegram(text: str) -> str:
+        text = TelegramRunner._sanitize_internal_artifacts(text)
+        text = TelegramRunner._convert_markdown_tables(text)
+        # Telegram Legacy Markdown uses * for bold, but LLMs often output **
+        # Replace **bold** with *bold*
+        text = re.sub(r'\*\*([^\*]+)\*\*', r'*\1*', text)
+        # LLMs also sometimes output ### headers. Legacy markdown has no header support.
+        # Replace ### Header with *Header*
+        text = re.sub(r'^#+\s+(.+)$', r'*\1*', text, flags=re.MULTILINE)
+        # Replace --- horizontal rules with a unicode line
+        text = re.sub(r'^\s*[-_]{3,}\s*$', '──────────────', text, flags=re.MULTILINE)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
+    @classmethod
+    def _sanitize_internal_artifacts(cls, text: str) -> str:
+        if not text:
+            return text
+
+        cleaned = cls._INTERNAL_TOOL_CALL_RE.sub("", text).strip()
+        if cleaned:
+            return cleaned
+        return text.strip()
+
+    @classmethod
+    def _convert_markdown_tables(cls, text: str) -> str:
+        lines = text.splitlines()
+        converted: list[str] = []
+        i = 0
+
+        while i < len(lines):
+            if cls._looks_like_markdown_table(lines, i):
+                headers = cls._split_table_row(lines[i])
+                i += 2
+                table_rows: list[str] = []
+
+                while i < len(lines) and cls._looks_like_table_row(lines[i]):
+                    row = cls._render_table_row(headers, cls._split_table_row(lines[i]))
+                    if row:
+                        table_rows.append(row)
+                    i += 1
+
+                if table_rows:
+                    if converted and converted[-1].strip():
+                        converted.append("")
+                    converted.extend(table_rows)
+                    if i < len(lines) and lines[i].strip():
+                        converted.append("")
+                    continue
+
+            converted.append(lines[i])
+            i += 1
+
+        return "\n".join(converted)
+
+    @classmethod
+    def _looks_like_markdown_table(cls, lines: list[str], index: int) -> bool:
+        if index + 1 >= len(lines):
+            return False
+
+        header = cls._split_table_row(lines[index])
+        separator = cls._split_table_row(lines[index + 1])
+        if len(header) < 2 or len(header) != len(separator):
+            return False
+
+        return all(
+            cls._TABLE_SEPARATOR_RE.fullmatch(cell) is not None
+            for cell in separator
+        )
+
+    @staticmethod
+    def _looks_like_table_row(line: str) -> bool:
+        stripped = line.strip()
+        return stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2
+
+    @staticmethod
+    def _split_table_row(line: str) -> list[str]:
+        return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+    @staticmethod
+    def _render_table_row(headers: list[str], cells: list[str]) -> str:
+        pairs = [
+            (headers[index], cells[index])
+            for index in range(min(len(headers), len(cells)))
+            if cells[index]
+        ]
+        if not pairs:
+            return ""
+
+        first_header = headers[0].strip().lower()
+        if first_header in {"project", "name", "item"}:
+            lead = pairs[0][1]
+            details = [f"{header}: {value}" for header, value in pairs[1:]]
+            if details:
+                return f"- *{lead}*: " + "; ".join(details)
+            return f"- *{lead}*"
+
+        return "- " + " | ".join(f"{header}: {value}" for header, value in pairs)

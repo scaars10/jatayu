@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+from pathlib import Path
 from uuid import uuid4
 
 from pydantic_ai import RunContext
@@ -13,6 +16,60 @@ from storage.service import StorageService
 
 # The participant ID used by the agent system, typically 0
 AGENT_PARTICIPANT_ID = 0
+DEEP_RESEARCH_OUTPUT_DIR = Path("deep_research_output")
+FEEDBACK_PLACEHOLDER = "<!-- Research task feedback and refinements go here -->\n"
+
+logger = logging.getLogger(__name__)
+
+
+def _workspace_dir(task_id: int) -> Path:
+    return DEEP_RESEARCH_OUTPUT_DIR / f"task_{task_id}"
+
+
+def _sync_research_workspace(task, event: TelegramMessageEvent | None = None) -> Path:
+    task_dir = _workspace_dir(task.id)
+    task_dir.mkdir(parents=True, exist_ok=True)
+
+    metadata_path = task_dir / "metadata.json"
+    metadata: dict[str, object] = {}
+    if metadata_path.exists():
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except Exception:
+            metadata = {}
+
+    metadata.update(
+        {
+            "task_id": task.id,
+            "topic": task.topic,
+            "status": task.status,
+            "step": task.step,
+            "created_at": task.created_at.isoformat(),
+            "updated_at": task.updated_at.isoformat(),
+        }
+    )
+    if event is not None:
+        metadata["request_event"] = event.model_dump(mode="json")
+
+    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+    questions = task.specific_questions.split("\n") if task.specific_questions else []
+    questions_body = "\n".join(f"- {question}" for question in questions if question.strip()) or "- None provided\n"
+    (task_dir / "specific_questions.md").write_text(questions_body, encoding="utf-8")
+
+    feedback_body = task.feedback.strip() if task.feedback else FEEDBACK_PLACEHOLDER.strip()
+    (task_dir / "feedback.md").write_text(feedback_body + "\n", encoding="utf-8")
+
+    if task.report:
+        (task_dir / "report.md").write_text(task.report, encoding="utf-8")
+        if task.report.startswith("Sources:\n"):
+            sources = [line for line in task.report.splitlines()[1:] if line.strip()]
+            (task_dir / "sources.txt").write_text("\n".join(sources) + ("\n" if sources else ""), encoding="utf-8")
+
+    if task.sources_content:
+        (task_dir / "sources_content.md").write_text(task.sources_content, encoding="utf-8")
+
+    return task_dir
 
 async def send_proactive_update(event: TelegramMessageEvent, message: str):
     """Send a proactive update to the user."""
@@ -45,6 +102,8 @@ async def research_task_runner(task_id: int, event: TelegramMessageEvent) -> Non
             await storage_service.close()
             return
 
+        _sync_research_workspace(task, event)
+
         specific_questions = task.specific_questions.split("\n") if task.specific_questions else []
 
         if task.step == "gather_sources":
@@ -55,6 +114,10 @@ async def research_task_runner(task_id: int, event: TelegramMessageEvent) -> Non
             storage_service.research_tasks.update_report(task_id=task_id, report=report)
             storage_service.research_tasks.update_step(task_id=task_id, step="read_sources")
             storage_service.research_tasks.update_status(task_id=task_id, status="paused")
+            updated_task = storage_service.research_tasks.get_by_id(task_id)
+            if updated_task:
+                _sync_research_workspace(updated_task, event)
+                task = updated_task
             
             # Notify user
             report = f"I have gathered the following sources for your research on '{task.topic}':\n" + "\n".join(sources)
@@ -69,6 +132,10 @@ async def research_task_runner(task_id: int, event: TelegramMessageEvent) -> Non
             storage_service.research_tasks.update_sources_content(task_id=task_id, sources_content=sources_content)
             storage_service.research_tasks.update_step(task_id=task_id, step="synthesize_report")
             storage_service.research_tasks.update_status(task_id=task_id, status="paused")
+            updated_task = storage_service.research_tasks.get_by_id(task_id)
+            if updated_task:
+                _sync_research_workspace(updated_task, event)
+                task = updated_task
 
             # Notify user
             report = f"I have read the sources for your research on '{task.topic}'. Provide feedback or tell me to continue to the final report."
@@ -81,11 +148,20 @@ async def research_task_runner(task_id: int, event: TelegramMessageEvent) -> Non
             storage_service.research_tasks.update_report(task_id=task_id, report=report)
             storage_service.research_tasks.update_status(task_id=task_id, status="completed")
             storage_service.research_tasks.update_step(task_id=task_id, step="completed")
+            updated_task = storage_service.research_tasks.get_by_id(task_id)
+            if updated_task:
+                _sync_research_workspace(updated_task, event)
+                task = updated_task
             await send_proactive_update(event, report)
 
     except Exception as e:
+        error_message = f"An error occurred while running the research task: {e}"
+        storage_service.research_tasks.update_report(task_id=task_id, report=error_message)
         storage_service.research_tasks.update_status(task_id=task_id, status="failed")
-        await send_proactive_update(event, f"An error occurred while running the research task: {e}")
+        failed_task = storage_service.research_tasks.get_by_id(task_id)
+        if failed_task:
+            _sync_research_workspace(failed_task, event)
+        await send_proactive_update(event, error_message)
     finally:
         await storage_service.close()
 
@@ -107,6 +183,8 @@ async def start_deep_research_task(ctx: RunContext[TelegramMessageEvent], topic:
         specific_questions="\n".join(specific_questions)
     )
     storage_service.research_tasks.update_step(task_id=task.id, step="gather_sources")
+    task = storage_service.research_tasks.get_by_id(task.id) or task
+    _sync_research_workspace(task, event)
     await storage_service.close()
     
     asyncio.create_task(research_task_runner(task.id, event))
@@ -179,6 +257,10 @@ async def provide_feedback_to_research_task(task_id: int, feedback: str) -> str:
         return f"Research task with ID {task_id} not found."
     
     storage_service.research_tasks.update_feedback(task_id=task_id, feedback=feedback)
+    updated_task = storage_service.research_tasks.get_by_id(task_id)
     await storage_service.close()
+
+    if updated_task is not None:
+        _sync_research_workspace(updated_task)
     
     return f"Feedback has been provided to research task {task_id}. The research will be refined based on your feedback."

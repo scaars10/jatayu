@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+from telegram.constants import ParseMode
 
 from models import AgentResponseEvent
 from comms.telegram.runner import TelegramRunner
@@ -31,6 +32,26 @@ class TelegramRunnerTests(unittest.TestCase):
         mock_listener.assert_called_once_with([1, 2], nats_client)
         self.assertIs(runner.nats_client, nats_client)
         self.assertIs(runner.application, app)
+
+    def test_format_for_telegram_sanitizes_artifacts_and_flattens_tables(self) -> None:
+        text = """
+## Watchlist
+
+| Project | Livability Factor | Appreciation Potential |
+| :--- | :--- | :--- |
+| *DNR Arista* | *High* | *Extreme* |
+| *Purva Weaves* | *High* | *High* |
+
+Would you like me to keep tracking?"}call:default_api:final_result{requires_audio:false,response:
+"""
+
+        formatted = TelegramRunner._format_for_telegram(text)
+
+        self.assertIn("*Watchlist*", formatted)
+        self.assertIn("- *DNR Arista*: Livability Factor: *High*; Appreciation Potential: *Extreme*", formatted)
+        self.assertIn("- *Purva Weaves*: Livability Factor: *High*; Appreciation Potential: *High*", formatted)
+        self.assertNotIn("| Project |", formatted)
+        self.assertNotIn("call:default_api:final_result", formatted)
 
 
 class TelegramRunnerAsyncTests(unittest.IsolatedAsyncioTestCase):
@@ -74,6 +95,7 @@ class TelegramRunnerAsyncTests(unittest.IsolatedAsyncioTestCase):
             chat_id=100,
             text="hello back",
             reply_to_message_id=300,
+            parse_mode=ParseMode.MARKDOWN,
         )
         storage_service.mark_message_delivered.assert_awaited_once_with(
             event_id="evt-response",
@@ -191,6 +213,7 @@ class TelegramRunnerAsyncTests(unittest.IsolatedAsyncioTestCase):
                 chat_id=100,
                 text="I couldn't send the audio reply, so I'm sending the text version instead.\n\nhello back",
                 reply_to_message_id=300,
+                parse_mode=ParseMode.MARKDOWN,
             )
             storage_service.mark_message_delivered.assert_awaited_once_with(
                 event_id="evt-audio-fallback",

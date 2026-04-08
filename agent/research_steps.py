@@ -158,7 +158,7 @@ async def web_search(query: str) -> str:
     try:
         client = get_client()
         response = await client.aio.models.generate_content(
-            model=gemini_model.get_balanced_model(),
+            model=gemini_model.get_large_model(),
             contents=query,
             config=types.GenerateContentConfig(
                 tools=[types.Tool(google_search=types.GoogleSearch())],

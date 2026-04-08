@@ -8,6 +8,33 @@ from storage import ConversationTurn, LongTermMemoryRecord
 
 
 class LongTermMemoryManagerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_remember_text_exchange_skips_research_related_exchanges(self) -> None:
+        storage_service = AsyncMock()
+        client = MagicMock()
+        client.aio.models.generate_content = AsyncMock()
+
+        with patch("agent.long_term_memory.get_client", return_value=client):
+            manager = LongTermMemoryManager(storage_service)
+            event = TelegramMessageEvent(
+                event_id="evt-research-memory",
+                source="telegram",
+                message="Keep searching for flats near Embassy Tech Village and notify me about good options.",
+                channel_id=100,
+                sender_id=200,
+                message_id=300,
+            )
+
+            stored = await manager.remember_text_exchange(
+                event,
+                "Started continuous research on 'flats near Embassy Tech Village'. Task ID is cr_1234abcd. I will keep looking in the background.",
+                history=[],
+            )
+
+        self.assertEqual(stored, [])
+        storage_service.get_long_term_memories.assert_not_called()
+        storage_service.upsert_long_term_memory.assert_not_called()
+        client.aio.models.generate_content.assert_not_called()
+
     async def test_remember_text_exchange_upserts_model_selected_memories(self) -> None:
         storage_service = AsyncMock()
         storage_service.get_long_term_memories.return_value = [

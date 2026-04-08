@@ -199,3 +199,15 @@ class LongTermMemoryRepository:
             ),
         ).fetchall()
         return [_to_record(row) for row in rows]
+
+    def list_all_active(self) -> list[LongTermMemoryRecord]:
+        """Get all active long-term memories for compression purposes."""
+        rows = self.connection.execute(
+            """
+            SELECT *
+            FROM long_term_memories
+            WHERE status = 'active'
+            ORDER BY updated_at ASC
+            """
+        ).fetchall()
+        return [_to_record(row) for row in rows]

@@ -2,4 +2,9 @@
 .venv/
 .idea/
 __pycache__/
+data/continuous_research_output/
+continuous_research_output/
+stash/
+docs/
 data/
+deep_research_output/

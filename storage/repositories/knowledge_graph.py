@@ -95,6 +95,57 @@ class KnowledgeGraphRepository:
             )
             return [KGEdgeRecord(**dict(row)) for row in cursor.fetchall()]
     
+    def list_all_nodes(self) -> list[KGNodeRecord]:
+        """Get all nodes in the knowledge graph."""
+        with self.db.connect() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, name, type, attributes, created_at, updated_at
+                FROM kg_nodes
+                ORDER BY id ASC
+                """
+            )
+            return [KGNodeRecord(**dict(row)) for row in cursor.fetchall()]
+
+    def list_all_edges(self) -> list[KGEdgeRecord]:
+        """Get all edges in the knowledge graph."""
+        with self.db.connect() as conn:
+            cursor = conn.execute(
+                """
+                SELECT id, source_node_id, target_node_id, relation, attributes, created_at, updated_at
+                FROM kg_edges
+                ORDER BY id ASC
+                """
+            )
+            return [KGEdgeRecord(**dict(row)) for row in cursor.fetchall()]
+
+    def delete_node(self, node_id: int) -> None:
+        """Delete a node by its ID (cascades to edges)."""
+        with self.db.connect() as conn:
+            conn.execute("DELETE FROM kg_nodes WHERE id = ?", (node_id,))
+
+    def reassign_edges(self, old_node_id: int, new_node_id: int) -> None:
+        """Reassign all edges from old_node_id to new_node_id."""
+        with self.db.connect() as conn:
+            # Update edges where old_node_id was the source
+            conn.execute(
+                """
+                UPDATE OR IGNORE kg_edges
+                SET source_node_id = ?
+                WHERE source_node_id = ?
+                """,
+                (new_node_id, old_node_id)
+            )
+            # Update edges where old_node_id was the target
+            conn.execute(
+                """
+                UPDATE OR IGNORE kg_edges
+                SET target_node_id = ?
+                WHERE target_node_id = ?
+                """,
+                (new_node_id, old_node_id)
+            )
+
     def search_graph(self, query_entity: str) -> dict:
         """Search for a specific entity and return its localized graph structure."""
         from dataclasses import asdict
