@@ -1,0 +1,16 @@
+{
+  "documents": [
+    {
+      "query": "embassy tech village apartments latest updates",
+      "title": "Forum rumor",
+      "url": "https://reddit.com/r/example/post",
+      "source": "reddit.com",
+      "snippet": "Forum rumor about a sharp discount",
+      "content_excerpt": "A forum post claimed a sharp discount.",
+      "content_hash": "hash-low-trust",
+      "tier": "low_trust"
+    }
+  ],
+  "expected_reason_substring": "low-trust or insufficiently corroborated",
+  "proposed_summary": "A forum post claimed a sharp discount."
+}

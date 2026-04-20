@@ -122,11 +122,7 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         mock_run.return_value = MagicMock(output=AgentOutput(response="should not be used", requires_audio=False))
 
         with patch("agent.chat_agent.get_env", return_value="fake_key"), \
-             patch("pydantic_ai.Agent.run", mock_run), \
-             patch(
-                 "agent.chat_agent.start_continuous_research",
-                 new=AsyncMock(return_value="Started continuous research on 'flats near Embassy Tech Village'. Task ID is cr_test1234."),
-             ) as start_continuous:
+             patch("pydantic_ai.Agent.run", mock_run):
             agent = ChatAgent(
                 storage_service=storage_service,
                 memory_manager=memory_manager,
@@ -140,7 +136,11 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
                 message_id=306,
             )
 
-            response = await agent.respond(event)
+            with patch(
+                "agent.chat_agent.start_continuous_research",
+                new=AsyncMock(return_value="Started continuous research on 'flats near Embassy Tech Village'. Task ID is cr_test1234."),
+            ) as start_continuous:
+                response = await agent.respond(event)
 
         self.assertIn("Started continuous research", response.response)
         start_continuous.assert_awaited_once()
@@ -176,10 +176,6 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
         with patch("agent.chat_agent.get_env", return_value="fake_key"), \
              patch("pydantic_ai.Agent.run", mock_run), \
              patch(
-                 "agent.chat_agent.update_continuous_research_plan",
-                 new=AsyncMock(return_value="Wrote feedback for task cr_feedback01 to 'feedback.md'. Triggered a new research cycle to process it."),
-             ) as update_feedback, \
-             patch(
                  "agent.chat_agent.global_continuous_state.get_all_tasks",
                  return_value=[active_task],
              ):
@@ -196,7 +192,11 @@ class ChatAgentTests(unittest.IsolatedAsyncioTestCase):
                 message_id=306,
             )
 
-            response = await agent.respond(event)
+            with patch(
+                "agent.chat_agent.update_continuous_research_plan",
+                new=AsyncMock(return_value="Wrote feedback for task cr_feedback01 to 'feedback.md'. Triggered a new research cycle to process it."),
+            ) as update_feedback:
+                response = await agent.respond(event)
 
         self.assertIn("Wrote feedback for task cr_feedback01", response.response)
         update_feedback.assert_awaited_once()

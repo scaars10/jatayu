@@ -1,0 +1,24 @@
+{
+  "documents": [
+    {
+      "query": "embassy tech village apartments price update",
+      "title": "Developer price update",
+      "url": "https://builder.example.com/pricing",
+      "source": "builder.example.com",
+      "snippet": "Official pricing update",
+      "content_excerpt": "The builder published a price update.",
+      "content_hash": "hash-builder",
+      "tier": "official"
+    },
+    {
+      "query": "embassy tech village apartments price update",
+      "title": "Primary report on pricing",
+      "url": "https://reuters.com/example-price-update",
+      "source": "reuters.com",
+      "snippet": "Independent report on pricing",
+      "content_excerpt": "Reuters independently reported the pricing change.",
+      "content_hash": "hash-reuters",
+      "tier": "primary_reporting"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "claims": [
+    {
+      "id": "claim_completion_q4",
+      "statement": "Project handover will happen in Q4 2026.",
+      "status": "active",
+      "confidence": 0.8,
+      "supporting_urls": [
+        "https://builder.example.com/q4"
+      ],
+      "source_tiers": [
+        "official"
+      ],
+      "contradicts": [],
+      "updated_at": "2026-04-01T00:00:00+00:00",
+      "notes": "Prior builder update."
+    }
+  ]
+}

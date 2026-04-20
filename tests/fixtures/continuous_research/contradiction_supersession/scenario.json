@@ -1,0 +1,21 @@
+{
+  "incoming_claims": [
+    {
+      "id": "claim_completion_q1",
+      "statement": "Project handover will happen in Q1 2027.",
+      "status": "active",
+      "confidence": 0.92,
+      "supporting_urls": [
+        "https://rera.karnataka.gov.in/q1-2027"
+      ],
+      "source_tiers": [
+        "regulatory"
+      ],
+      "contradicts": [
+        "claim_completion_q4"
+      ],
+      "updated_at": "2026-04-08T00:00:00+00:00",
+      "notes": "Newer regulatory filing."
+    }
+  ]
+}

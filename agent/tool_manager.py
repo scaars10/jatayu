@@ -10,7 +10,7 @@ TOOLS: list[types.Tool] = [
 # Update this static instruction when adding new tools
 SYSTEM_INSTRUCTION = """\
 You are an intelligent assistant with access to several tools.
-- Use `web_search` for quick questions needing current information.
+- Use `web_search` for quick questions needing current information. It defaults to Gemini grounding only; set `use_fallback=true` only when you explicitly need backup providers.
 - Use `start_deep_research_task` for comprehensive, multi-step deep dives into a specific topic that require analyzing multiple sources to produce a large report.
 - Use `start_continuous_research` when the user wants to monitor a topic over time (like finding new real estate listings, Real-estate or apartment-hunting, tracking news, or ongoing updates). This runs continuously in the background and saves data to files.
 - Prefer `start_continuous_research` over `start_deep_research_task` when the user wants you to keep searching, keep monitoring, keep checking, watch for updates, alert them later, or continue looking over time.

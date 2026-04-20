@@ -16,6 +16,7 @@ class ContinuousTask(BaseModel):
     topic: str
     instructions: str
     status: str  # "running", "paused", "stopped"
+    workspace_version: str = ""
     source_event_id: str = ""
     source_message_id: int | None = None
     source_channel_id: int | None = None
@@ -23,6 +24,8 @@ class ContinuousTask(BaseModel):
     last_summary: str = ""
     plan: str = ""  # High-level research plan
     no_new_findings_count: int = 0
+    unverified_signal_count: int = 0
+    suppressed_notification_count: int = 0
     cycle_count: int = 0
     failure_count: int = 0
     last_error: str = ""
